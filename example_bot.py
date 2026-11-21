@@ -15,7 +15,7 @@ def yaw_to(a, b):
 
 
 class Bot(Evade):
-    name = "Trojan Tempo v5"
+    name = "Trojan Equip"
 
     def __init__(self, hello):
         super().__init__(hello)
@@ -111,8 +111,8 @@ class Bot(Evade):
                 gain, _ = self.equipment(me["weapons"],item["kind"],obs["zone"]["next_radius"])
                 if gain <= 0:
                     continue
-                value = (48+0.65*gain) if empty else (26+0.83*gain)
-                reach = 148 if now < 65 and empty else 82
+                value = (240+gain) if empty else (26+0.83*gain)
+                reach = 230 if now < 80 and empty else 100
             elif kind == "crates":
                 if hp < 0.77 or me.get("cubes", 0) >= 10:
                     continue
@@ -281,9 +281,9 @@ class Bot(Evade):
         urgent = not me["in_zone"] or (gap > 0 and 1.5*gap/speed+4 >= z["shrink_end"]-now)
         evading = self.state == "EVADE"
         loot = None
-        if not evading and not urgent:
+        if not urgent and (not evading or (now < 55 and hp > 0.65 and me["weapons"][1] is None)):
             loot = self.best_loot(obs, visible, hp, speed)
-        if evading and not urgent:
+        if evading and not urgent and loot is None:
             loot = self.immediate_reward(obs,act["move"],hp)
         self.objective = loot[0] if loot else None
         if loot:
