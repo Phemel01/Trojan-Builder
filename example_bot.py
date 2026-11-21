@@ -15,7 +15,7 @@ def yaw_to(a, b):
 
 
 class Bot(Evade):
-    name = "Trojan GrowSafe"
+    name = "Trojan CubeRush"
 
     def __init__(self, hello):
         super().__init__(hello)
@@ -106,7 +106,7 @@ class Bot(Evade):
                 continue
             service = 0
             if kind == "cubes":
-                value, reach = (110 if me.get("cubes", 0)<10 else 64), (86 if me.get("cubes", 0)<3 else 62)
+                value, reach = (230 if me.get("cubes", 0)<6 else 85), (130 if me.get("cubes", 0)<6 else 75)
             elif kind == "pickups":
                 gain, _ = self.equipment(me["weapons"],item["kind"],obs["zone"]["next_radius"])
                 if gain <= 0:
