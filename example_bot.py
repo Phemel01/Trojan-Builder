@@ -15,7 +15,7 @@ def yaw_to(a, b):
 
 
 class Bot(Evade):
-    name = "Trojan Tempo v5"
+    name = "Trojan GrowSafe"
 
     def __init__(self, hello):
         super().__init__(hello)
@@ -111,12 +111,12 @@ class Bot(Evade):
                 gain, _ = self.equipment(me["weapons"],item["kind"],obs["zone"]["next_radius"])
                 if gain <= 0:
                     continue
-                value = (48+0.65*gain) if empty else (26+0.83*gain)
-                reach = 148 if now < 65 and empty else 82
+                value = (240+gain) if empty else (26+0.83*gain)
+                reach = 230 if now < 80 and empty else 100
             elif kind == "crates":
                 if hp < 0.77 or me.get("cubes", 0) >= 10:
                     continue
-                value, reach, service = 76, (110 if now < 65 and not me.get("cubes") else 52), 2.8
+                value, reach, service = 140, (130 if now < 100 else 65), 2.8
             else:
                 radius = item.get("radius", 8)
                 if item.get("holder") not in (None, self.slot):
@@ -281,9 +281,9 @@ class Bot(Evade):
         urgent = not me["in_zone"] or (gap > 0 and 1.5*gap/speed+4 >= z["shrink_end"]-now)
         evading = self.state == "EVADE"
         loot = None
-        if not evading and not urgent:
+        if not urgent and (not evading or (now < 55 and hp > 0.65 and me["weapons"][1] is None)):
             loot = self.best_loot(obs, visible, hp, speed)
-        if evading and not urgent:
+        if evading and not urgent and loot is None:
             loot = self.immediate_reward(obs,act["move"],hp)
         self.objective = loot[0] if loot else None
         if loot:
@@ -368,7 +368,7 @@ class Bot(Evade):
             target, item_kind = min(drones, key=lambda m: distance(pos,m["pos"])), "npc"
         elif loot and loot[0][0]=="crates" and loot[2]:
             target, item_kind = loot[1], "crate"
-        if not low and hp >= 0.40 and mechs:
+        if not low and hp >= 0.40 and mechs and me.get("cubes",0) >= 3:
             rival = self.opportunity(me, mechs, urgent)
             if rival is not None:
                 target, item_kind = rival, "mech"
