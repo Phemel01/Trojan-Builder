@@ -15,7 +15,7 @@ def yaw_to(a, b):
 
 
 class Bot(Evade):
-    name = "Trojan Placement v4"
+    name = "Trojan Tempo v5"
 
     def __init__(self, hello):
         super().__init__(hello)
@@ -219,6 +219,41 @@ class Bot(Evade):
                 firing.append(d <= stats.get("range", self.shoot_r))
         act["fire"] = firing
 
+    def opportunity(self, me, rivals, urgent):
+        """Focus a visible rival that can be removed soon, accounting for turn time."""
+        pos = me["pos"]
+        budget = self.shoot_r
+        if urgent:
+            budget = min(budget, self.danger_r)
+        turn_rate = max(0.1, me["stats"].get("turn_rate", 4))
+        best, best_cost = None, math.inf
+        for rival in rivals:
+            if rival.get("hp") is None or rival["hp"] <= 0:
+                continue
+            point = rival["pos"]
+            gap = distance(pos, point)
+            if gap > budget or not self.floor.clear(pos, point):
+                continue
+            turn = abs(math.remainder(yaw_to(pos, point) - me["aim"][0], 2 * math.pi)) / turn_rate
+            # Compare time to remove this HP bar, with a discount for an uninterrupted exchange.
+            cost = rival["hp"] / 110 + gap / 85 + turn
+            if rival["id"] == self.focus:
+                cost -= 1.4
+            if rival["id"] in self.attackers:
+                cost -= 0.8
+            if cost < best_cost:
+                best, best_cost = rival, cost
+        return best
+
+    def quiet_scan(self, me, act, rivals):
+        """Turn through unseen parts of the game's 120-degree field of view while walking."""
+        if self.state != "ROAM" or rivals or any(act.get("fire", ())) or self.attackers:
+            return
+        if any(w and w.get("charge", 0) for w in me["weapons"]):
+            return
+        yaw = me["aim"][0] + self.nav.side * 0.27
+        act["aim"] = [math.remainder(yaw, 2 * math.pi), 0.0]
+
     def act(self, obs):
         act = super().act(obs)
         recover_move = act["move"] if self.state == "RECOVER" else None
@@ -333,6 +368,10 @@ class Bot(Evade):
             target, item_kind = min(drones, key=lambda m: distance(pos,m["pos"])), "npc"
         elif loot and loot[0][0]=="crates" and loot[2]:
             target, item_kind = loot[1], "crate"
+        if not low and hp >= 0.40 and mechs:
+            rival = self.opportunity(me, mechs, urgent)
+            if rival is not None:
+                target, item_kind = rival, "mech"
         if target:
             point = target["pos"]
             d = distance(pos, point)
@@ -367,6 +406,7 @@ class Bot(Evade):
                 act["reload"] = True
         if not act.get("fire") and self.state=="EVADE" and self.threat_bearings:
             act["aim"] = [self.threat_bearings[-1][1], 0.0]
+        self.quiet_scan(me, act, mechs)
         if "aim" in act:
             pitch = act["aim"][1]
             stats = me.get("stats", {})
