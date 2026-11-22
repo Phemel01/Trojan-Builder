@@ -15,7 +15,7 @@ def yaw_to(a, b):
 
 
 class Bot(Evade):
-    name = "Trojan OpeningLoop"
+    name = "Trojan PursuitValue"
 
     def __init__(self, hello):
         super().__init__(hello)
@@ -24,6 +24,8 @@ class Bot(Evade):
         self.floor = FloorMap(hello)
         self.nav = Navigator(self.floor, 1 if self.slot % 2 == 0 else -1)
         self.seen = {}
+        self.pursuit = None
+        self.pursuit_values = {}
         self.objective = None
         self.phase = None
         self.anchor = None
@@ -91,6 +93,23 @@ class Bot(Evade):
                     return gain, idx
         return 0, None
 
+
+    def observe_pursuit(self, obs):
+        me=obs["self"]
+        if self.pursuit is None:
+            return
+        key, kind, start, hp, cubes, equipped = self.pursuit
+        elapsed=obs["t"] - start
+        new_gear=sum(bool(slot) for slot in me["weapons"])
+        gained=me.get("cubes",0)-cubes
+        if elapsed < 3 and self.objective == key and gained <= 0 and new_gear <= equipped:
+            return
+        if elapsed >= .5 or gained > 0 or new_gear > equipped:
+            result=min(1,gained) + (new_gear-equipped) + 2*(me["hp"]/me["max_hp"]-hp) - min(1,elapsed/8)
+            n,estimate=self.pursuit_values.get(kind,(0,0))
+            self.pursuit_values[kind]=(n+1,estimate+(result-estimate)/(n+3))
+        self.pursuit=None
+
     def best_loot(self, obs, visible, hp, speed):
         me, now = obs["self"], obs["t"]
         pos = me["pos"]
@@ -141,6 +160,7 @@ class Bot(Evade):
                     free = self.floor.nearest(cell, comp, 2)
                     if free is None or distance(point, self.floor.xy(free)) > 3.5:
                         continue
+            value += 115*self.pursuit_values.get(kind,(0,0))[1]
             value -= 0.84*d + 4*(now-seen_at)
             if self.floor.mask and not self.floor.clear(pos, point):
                 value -= 22
@@ -265,6 +285,7 @@ class Bot(Evade):
         hp = me["hp"]/max(1, me["max_hp"])
         speed = max(1, me.get("stats", {}).get("walk_speed", self.speed))
         goal = self.zone_goal(pos, z)
+        self.observe_pursuit(obs)
         visible = self.remember(obs)
         if obs.get("offer") and obs["offer"]["choices"]:
             act["pick"] = self.pick_upgrade(obs["offer"]["choices"], hp)
@@ -289,6 +310,8 @@ class Bot(Evade):
         if evading and not urgent and loot is None:
             loot = self.immediate_reward(obs,act["move"],hp)
         self.objective = loot[0] if loot else None
+        if self.pursuit is None and loot:
+            self.pursuit=(loot[0],loot[0][0],now,hp,me.get("cubes",0),sum(bool(w) for w in me["weapons"]))
         if self.opening_point is None:
             self.opening_point = tuple(pos[:2])
         if not loot and not urgent and not evading and now < 25:
