@@ -15,7 +15,7 @@ def yaw_to(a, b):
 
 
 class Bot(Evade):
-    name = "Trojan CubeRush"
+    name = "Trojan OpeningLoop"
 
     def __init__(self, hello):
         super().__init__(hello)
@@ -30,6 +30,9 @@ class Bot(Evade):
         self.focus = None
         self.jet_until = -1.0
         self.next_jet = 0.0
+        self.opening_point = None
+        self.loop_phase = None
+        self.loop_goal = None
         self.progress_sample = None
 
     def zone_goal(self, pos, zone):
@@ -286,8 +289,31 @@ class Bot(Evade):
         if evading and not urgent and loot is None:
             loot = self.immediate_reward(obs,act["move"],hp)
         self.objective = loot[0] if loot else None
+        if self.opening_point is None:
+            self.opening_point = tuple(pos[:2])
+        if not loot and not urgent and not evading and now < 25:
+            inward = direction(self.opening_point, z["next_center"])
+            shelter = (self.opening_point[0] - self.nav.side * inward[1] * 0,
+                       self.opening_point[1] + self.nav.side * inward[0] * 0)
+            if self.reachable_before_shrink(pos, shelter, 2, speed, obs):
+                goal = shelter
         if loot:
             goal = loot[1]["pos"][:2]
+
+        if not urgent and not loot and self.state == "ROAM" and z["next_radius"] > 32:
+            center, radius = z["next_center"], z["next_radius"]
+            goal_phase = (*center, radius)
+            if self.loop_phase != goal_phase:
+                self.loop_phase = goal_phase
+                self.loop_goal = None
+            if self.loop_goal is None and distance(pos, goal) < 10 or self.loop_goal is not None and distance(pos, self.loop_goal) < 5:
+                angle = yaw_to(center, pos) + self.nav.side * .26
+                ring = min(radius * 0.62, max(radius * 0.24, distance(pos, center)))
+                point = (center[0] + ring*math.cos(angle), center[1] + ring*math.sin(angle))
+                if self.reachable_before_shrink(pos, point, 0, speed, obs):
+                    self.loop_goal = point
+            if self.loop_goal is not None and self.reachable_before_shrink(pos, self.loop_goal, 0, speed, obs):
+                goal = self.loop_goal
         if urgent or not evading or loot:
             act["move"] = list(self.nav.toward(pos[:2], tuple(goal), tick))
             act["jump"] = False
