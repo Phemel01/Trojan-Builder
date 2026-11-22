@@ -368,7 +368,7 @@ class Bot(Evade):
                      or (laser and hp>0.80 and distance(pos,other["pos"])>50)) and
                     (not self.floor.mask or self.floor.clear(pos,other["pos"])))
         drones = [m for m in obs.get("mechs", ()) if m.get("kind") == "npc"
-                  and distance(pos,m["pos"]) <= 48]
+                  and distance(pos,m["pos"]) <= 95 and self.floor.clear(pos,m["pos"])]
         target, item_kind = None, None
         if low and (not urgent or hp > 0.5):
             target, item_kind = low[0], "mech"
@@ -390,7 +390,7 @@ class Bot(Evade):
                     return abs(math.remainder(yaw_to(pos,m["pos"])-act["aim"][0],2*math.pi))
                 target = min(mechs,key=yaw_error)
             item_kind = "mech"
-        elif drones and not urgent and hp >= 0.62 and not mechs:
+        elif drones and not urgent and hp >= 0.62 and not nearby:
             target, item_kind = min(drones, key=lambda m: distance(pos,m["pos"])), "npc"
         elif loot and loot[0][0]=="crates" and loot[2]:
             target, item_kind = loot[1], "crate"

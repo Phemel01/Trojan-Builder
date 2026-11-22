@@ -19,7 +19,7 @@ def _yaw(a, b):
 
 
 class Bot(V4):
-    name = "Trojan OpeningLoop lead"
+    name = "Trojan LeadDroneValue"
 
     def _target(self, obs, yaw, pos):
         best = None
