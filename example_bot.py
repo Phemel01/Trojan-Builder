@@ -15,7 +15,7 @@ def yaw_to(a, b):
 
 
 class Bot(Evade):
-    name = "Trojan OpeningLoop"
+    name = "Trojan DamageSitesShort"
 
     def __init__(self, hello):
         super().__init__(hello)
@@ -24,6 +24,15 @@ class Bot(Evade):
         self.floor = FloorMap(hello)
         self.nav = Navigator(self.floor, 1 if self.slot % 2 == 0 else -1)
         self.seen = {}
+        self.pursuit = None
+        self.pursuit_values = {}
+        self.damage_sites = {}
+        self.near_sites = []
+        self.last_health = None
+        self.last_in_zone = False
+        self.site_refresh = 0
+        self.half_life = 6
+        self.learn_sites = True
         self.objective = None
         self.phase = None
         self.anchor = None
@@ -91,6 +100,23 @@ class Bot(Evade):
                     return gain, idx
         return 0, None
 
+
+    def observe_pursuit(self, obs):
+        me=obs["self"]
+        if self.pursuit is None:
+            return
+        key, kind, start, hp, cubes, equipped = self.pursuit
+        elapsed=obs["t"] - start
+        new_gear=sum(bool(slot) for slot in me["weapons"])
+        gained=me.get("cubes",0)-cubes
+        if elapsed < 3 and self.objective == key and gained <= 0 and new_gear <= equipped:
+            return
+        if elapsed >= .5 or gained > 0 or new_gear > equipped:
+            result=min(1,gained) + (new_gear-equipped) + 2*(me["hp"]/me["max_hp"]-hp) - min(1,elapsed/8)
+            n,estimate=self.pursuit_values.get(kind,(0,0))
+            self.pursuit_values[kind]=(n+1,estimate+(result-estimate)/(n+3))
+        self.pursuit=None
+
     def best_loot(self, obs, visible, hp, speed):
         me, now = obs["self"], obs["t"]
         pos = me["pos"]
@@ -141,6 +167,7 @@ class Bot(Evade):
                     free = self.floor.nearest(cell, comp, 2)
                     if free is None or distance(point, self.floor.xy(free)) > 3.5:
                         continue
+            value += 115*self.pursuit_values.get(kind,(0,0))[1]
             value -= 0.84*d + 4*(now-seen_at)
             if self.floor.mask and not self.floor.clear(pos, point):
                 value -= 22
@@ -257,6 +284,52 @@ class Bot(Evade):
         yaw = me["aim"][0] + self.nav.side * 0.27
         act["aim"] = [math.remainder(yaw, 2 * math.pi), 0.0]
 
+
+    def avoid_damage_sites(self, obs, act, goal, urgent, loot):
+        me, now = obs["self"], obs["t"]
+        pos = me["pos"][:2]
+        if self.last_health is not None and me["in_zone"] and self.last_in_zone:
+            loss = (self.last_health - me["hp"]) / max(1, me["max_hp"])
+            if loss > .002 and self.learn_sites:
+                cell = tuple(math.floor(x / 12) for x in pos)
+                old = self.damage_sites.get(cell, (now, 0))
+                risk = old[1] * 2 ** (-(now - old[0]) / self.half_life)
+                self.damage_sites[cell] = (now, min(1, risk + loss))
+        self.last_health = me["hp"]
+        self.last_in_zone = me["in_zone"]
+        if urgent or not me["in_zone"] or not any(act["move"]) or act.get("jump"):
+            return
+        if loot and distance(pos, loot[1]["pos"]) < 12:
+            return
+        # Bound work even in a long game. A trail is relevant only near our next steps.
+        if now >= self.site_refresh:
+            self.site_refresh = now + .5
+            self.damage_sites = {k:v for k,v in self.damage_sites.items()
+                                 if now - v[0] < 4*self.half_life}
+            self.near_sites = []
+            for (i,j), (when, amount) in self.damage_sites.items():
+                center = ((i+.5)*12,(j+.5)*12)
+                if distance(pos,center) < 48:
+                    self.near_sites.append((center,amount*2**(-(now-when)/self.half_life)))
+        if not self.near_sites:
+            return
+        dx, dy = act["move"]
+        best, best_move = float("inf"), None
+        zone = obs["zone"]
+        for turn in (0, self.nav.side*.78, -self.nav.side*.78):
+            ct, st = math.cos(turn), math.sin(turn)
+            vec = (dx*ct-dy*st, dx*st+dy*ct)
+            point = (pos[0]+16*vec[0], pos[1]+16*vec[1])
+            if turn and (distance(point,zone["center"]) > zone["radius"]-2
+                         or not self.floor.clear(pos,point)):
+                continue
+            risk = sum(v*max(0,1-distance(point,center)/26) for center,v in self.near_sites)
+            cost = risk + (.012 if turn else 0)
+            if cost < best:
+                best, best_move = cost, vec
+        if best_move is not None:
+            act["move"] = list(best_move)
+
     def act(self, obs):
         act = super().act(obs)
         recover_move = act["move"] if self.state == "RECOVER" else None
@@ -265,6 +338,7 @@ class Bot(Evade):
         hp = me["hp"]/max(1, me["max_hp"])
         speed = max(1, me.get("stats", {}).get("walk_speed", self.speed))
         goal = self.zone_goal(pos, z)
+        self.observe_pursuit(obs)
         visible = self.remember(obs)
         if obs.get("offer") and obs["offer"]["choices"]:
             act["pick"] = self.pick_upgrade(obs["offer"]["choices"], hp)
@@ -289,6 +363,8 @@ class Bot(Evade):
         if evading and not urgent and loot is None:
             loot = self.immediate_reward(obs,act["move"],hp)
         self.objective = loot[0] if loot else None
+        if self.pursuit is None and loot:
+            self.pursuit=(loot[0],loot[0][0],now,hp,me.get("cubes",0),sum(bool(w) for w in me["weapons"]))
         if self.opening_point is None:
             self.opening_point = tuple(pos[:2])
         if not loot and not urgent and not evading and now < 25:
@@ -433,6 +509,7 @@ class Bot(Evade):
         if not act.get("fire") and self.state=="EVADE" and self.threat_bearings:
             act["aim"] = [self.threat_bearings[-1][1], 0.0]
         self.quiet_scan(me, act, mechs)
+        self.avoid_damage_sites(obs, act, goal, urgent, loot)
         if "aim" in act:
             pitch = act["aim"][1]
             stats = me.get("stats", {})
